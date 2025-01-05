@@ -18,6 +18,7 @@ class System():
         l = self.__getLogger('execute_command')
         
         try:
+            l.trace(f"Executing command: {command}")
             subprocess.run(command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed: {e}")
@@ -45,6 +46,7 @@ class System():
         l = self.__getLogger('start')
 
         try:
+            # l.trace(f'Starting URL: {url}')
             await self.__execute_command(f'start "" "{url}"')
         except Exception as e:
             l.exception(f"Failed to start URL: {e}")

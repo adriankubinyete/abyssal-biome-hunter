@@ -39,6 +39,9 @@ class Application:
         self.window.geometry("650x250")  # Fixed window size (width x height)
         self.window.resizable(False, False)  # Prevent resizing of window
         
+        # Setting up icon
+        self.window.iconbitmap(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'imgs', 'favicon.ico'))
+        
         # Frame to hold all content
         main_frame = tk.Frame(self.window, padx=10, pady=10)
         main_frame.grid(row=0, column=0, sticky="nsew")
@@ -94,12 +97,11 @@ class Application:
     async def handle_biome_change(self, old_biome, new_biome):
         l = self.__getLogger('handle_biome_change')
         
-        if self.qty_biome_changes == 0: l.info("ATTENTION: I WILL NOT COUNT CHANGES TO NORMAL AS A BIOME CHANGE, THE COUNTER ONLY INCREMENTS IF IT GOES TO AN USEFUL BIOME, NORMAL IS JUST BASE BIOME SO IT SHOULD NOT COUNT AS BIOME CHANGE. THANKYOU")
-        
-        self.qty_biome_changes += 1
-        l.info(f'[#{self.qty_biome_changes}] BIOME CHANGE! From "{old_biome}" to "{new_biome}"')
         
         if new_biome == "NORMAL": return  # We don't care about the "NORMAL" biome
+        if self.qty_biome_changes == 0: l.info("ATTENTION: I WILL NOT COUNT CHANGES TO NORMAL AS A BIOME CHANGE, THE COUNTER ONLY INCREMENTS IF IT GOES TO AN USEFUL BIOME, NORMAL IS JUST BASE BIOME SO IT SHOULD NOT COUNT AS BIOME CHANGE. THANKYOU")
+        self.qty_biome_changes += 1 # only increment if it's a useful biome
+        l.info(f'[#{self.qty_biome_changes}] BIOME CHANGE! From "{old_biome}" to "{new_biome}"') # notify every change, even to normal
         
         if new_biome in ['GRAVEYARD', 'PUMPKIN MOON', 'SAND STORM', 'STARFALL']:
             l.info('INTERESTING BIOME DETECTED! Waiting until next non-normal change...')

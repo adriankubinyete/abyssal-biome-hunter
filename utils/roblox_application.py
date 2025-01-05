@@ -4,6 +4,7 @@ import time
 import psutil
 import asyncio
 import logging
+from urllib.parse import urlparse, parse_qs # for private server links
 from datetime import datetime
 from pathlib import Path
 from .system import System
@@ -11,7 +12,9 @@ from .system import System
 class RobloxApplication:
     def __init__(self):
         self.processes = []
-        self.log_name = 'abyssal.RobloxApplication.'
+        self.log_name = 'abyssal.Roblox.'
+        self.LOGFILE_DETECTION_METHOD = 'accesstime' # accesstime | filename
+        self.ALWAYS_SEND_LATEST_BIOME = False
         
         # --- SOLS STUFF ---
         self.ready_to_notify = None
@@ -51,8 +54,6 @@ class RobloxApplication:
         """Encontra o log mais recente que contém 'Player' e termina com '_last.log'."""
         l = self.__getLogger('get_latest_log')  # Obtém o logger para a função
         
-        LATEST_LOG_DETECTION_METHOD = "filename" # 'filename' or 'accesstime'
-        
         # Only try to get the latest log if the Roblox is running
         # Process has to be running for at least 10 seconds to be considered active
         if not self.is_running(min_runtime_seconds=15):
@@ -78,24 +79,32 @@ class RobloxApplication:
             l.error("No log file found.")
             return None
 
-        # DEBUG: Uncommenting this will print every log file and its last access time
+        # # DEBUG: Uncommenting this will print every log file and its last access time
         # for log_file in log_files:
         #     l.debug(f"LOG_FILE_NAME: {log_file.name}, FILE_TIME: {datetime.fromtimestamp(log_file.stat().st_atime)}")
 
         # Select the most recent log based on file modification time
-        if LATEST_LOG_DETECTION_METHOD == "filename":
+        
+        
+        # @TODO: try filename method, if fails for RPC, try accesstime method
+        if self.LOGFILE_DETECTION_METHOD == "filename":
             # break log names by underscores and take the second part (a timestamp formatted as 20250104T012925Z)
             latest_log = max(log_files, key=lambda f: datetime.strptime(f.name.split('_')[1], "%Y%m%dT%H%M%SZ"))
             # l.debug(f"Latest log via filename is {latest_log}")
-        elif LATEST_LOG_DETECTION_METHOD == "accesstime":
+        elif self.LOGFILE_DETECTION_METHOD == "accesstime":
             latest_log = max(log_files, key=lambda f: f.stat().st_atime)
             # l.debug(f"Latest log via last access time is {latest_log}")
         else:
             l.error("Invalid method. Use 'filename' or 'accesstime'.")
             return None
         
-        # l.trace(f'The latest log file is "{latest_log}", and it\'s last access time is {datetime.fromtimestamp(latest_log.stat().st_atime)} ({latest_log.stat().st_atime})')
-        return latest_log
+        return {
+        "path": latest_log, # full path including log file
+        "filename": latest_log.name, # 0.654.1.6540477_20250105T013421Z_Player_E45D9_last
+        "short_identifier": latest_log.name.split('_')[3], # E45D9
+        "timestamp_filename": latest_log.name.split('_')[1], # 20250105T013421Z
+        "last_modified": latest_log.stat().st_atime,
+        }
 
 
     def display_latest_log(self):
@@ -103,9 +112,9 @@ class RobloxApplication:
         Shows the content of the latest log file in the terminal.
         """
         l = self.__getLogger('display_latest_log')
-        latest_log = self.get_latest_log()
-        if latest_log:
-            with open(latest_log, "r", encoding="utf-8") as log_file:
+        log = self.get_latest_log()
+        if log:
+            with open(log['path'], "r", encoding="utf-8") as log_file:
                 l.debug(log_file.read())
                 
     # --------- SOLS RNG SPECIFIC STUFF ---------
@@ -116,10 +125,10 @@ class RobloxApplication:
         This will print straight to console the entire BloxstrapRPC log for the latest log file found.
         """
         l = self.__getLogger('print_bloxstrap_rpc_entries')
-        latest_log = self.get_latest_log()
-        if latest_log:
+        log = self.get_latest_log()
+        if log:
             last_rpc_entry = None
-            with open(latest_log, "r", encoding="utf-8") as log_file:
+            with open(log['path'], "r", encoding="utf-8") as log_file:
                 for line in log_file:
                     if "BloxstrapRPC" in line:
                         l.info(f"{line.strip()}")
@@ -131,10 +140,10 @@ class RobloxApplication:
         """
         l = self.__getLogger('get_latest_rpc_log_entry')
         
-        latest_log = self.get_latest_log()
-        if latest_log:
+        log = self.get_latest_log()
+        if log:
             last_rpc_entry = None
-            with open(latest_log, "r", encoding="utf-8") as log_file:
+            with open(log['path'], "r", encoding="utf-8") as log_file:
                 for line in log_file:
                     if "BloxstrapRPC" in line:
                         last_rpc_entry = line.strip()
@@ -143,7 +152,7 @@ class RobloxApplication:
                 # l.trace(f"{last_rpc_entry}")
                 return last_rpc_entry
             else:
-                l.warning("No BloxstrapRPC entry found in log file.")
+                l.warning(f"{log['short_identifier']} :: T-{log['timestamp_filename']}/LA-{log['last_modified']} : No BloxstrapRPC entry found in log file.")
         return None
     
     def get_latest_rpc_command(self):
@@ -184,7 +193,7 @@ class RobloxApplication:
                 data = latest_rpc_command.get("data", {})
                 largeImage = data.get("largeImage", None)
                 biome = largeImage.get("hoverText", None)
-                l.debug(f'{biome}')
+                if self.ALWAYS_SEND_LATEST_BIOME: l.debug(f'{biome}')
                 return biome
             except (json.JSONDecodeError, TypeError):
                 l.error("Failed to parse latest RPC command.")
@@ -222,17 +231,17 @@ class RobloxApplication:
                 else:
                     fail_counter += 1
                     if fail_counter % 5 == 0:
-                        l.debug(f"[#{fail_counter}] Failed to get latest biome. Is Roblox open?")
+                        l.debug(f"[#{fail_counter}] Failed to get latest biome. Roblox is either: 1. not open, 2. stuck at an errorcode screen or 3. stuck at loading data.")
                 self.last_biome = None
                 
                 if fail_counter >= max_fail_counter:
-                    self.is_running_biome_monitor = False
                     
                     if rejoin_url:
                         l.warning("Too many failed attempts to get biome. Rejoining...")
+                        fail_counter = 0
                         await self.rejoin(url=rejoin_url)
-                        l.test('this is post-rejoin')
                     else:
+                        self.is_running_biome_monitor = False
                         l.critical("Too many failed attempts to get biome. Exiting...")
                         raise  Exception("Too many failed attempts to get biome.")
             
@@ -261,17 +270,21 @@ class RobloxApplication:
             self.processes = []
             l.info("Roblox closed.")
             
-    async def join(self, url):
+    async def join(self, url, force_join=False):
         """
         Joins Roblox game with given URL.
         """
         l = self.__getLogger('join')
 
-        if self.is_running():
-            l.trace("Roblox is already running.")
-            return
+        if not force_join:
+            if self.is_running():
+                l.trace("Roblox is already running.")
+                return
 
-        await System._start(url=url)
+        FINAL_URL = f"roblox://placeID=15532962292&linkCode={parse_qs(urlparse(url).query).get("privateServerLinkCode", [None])[0]}"
+        
+        l.info(f'Joining: {FINAL_URL}')
+        await System._start(url=FINAL_URL)
         
     async def rejoin(self, url, join_delay_seconds=15):
         """
@@ -279,7 +292,8 @@ class RobloxApplication:
         """
         l = self.__getLogger('rejoin')
         
-        await self.close()
-        l.info(f"Waiting {join_delay_seconds} seconds before rejoining...")
-        await asyncio.sleep(join_delay_seconds)
-        await self.join(url)
+        # await self.close()
+        # l.info(f"Waiting {join_delay_seconds} seconds before rejoining...")
+        # await asyncio.sleep(join_delay_seconds)
+        l.test("Join game directly without quitting previously")
+        await self.join(url, force_join=True) 
